@@ -1,4 +1,5 @@
-// AI service integrations for text and image generation
+// AI Services mit echten API-Aufrufen
+import { GoogleGenerativeAI } from "@google/generative-ai"
 
 interface GenerateTextRequest {
   theme: {
@@ -10,38 +11,22 @@ interface GenerateTextRequest {
     beruf?: string
     zusatzinfo?: string
   }
-  template?: string
 }
 
 interface GenerateTextResponse {
   blogHtml: string
   pinDescription: string
   pinTags: string[]
-  tokensUsed: number
-}
-
-interface GenerateImageRequest {
-  theme: {
-    hobby: string
-    stil: string
-    anlass: string
-    budget: string
-  }
-  prompt?: string
-}
-
-interface GenerateImageResponse {
-  imageUrl: string
-  altText: string
-  prompt: string
 }
 
 export class AIServices {
-  // Google Gemini integration for text generation
+  // Google Gemini für Textgenerierung
   static async generateText(request: GenerateTextRequest): Promise<GenerateTextResponse> {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" })
+
     const { theme } = request
 
-    // Build prompt from template
     const prompt = `
 Erstelle einen SEO-optimierten Blog-Artikel über Geschenkideen für ${theme.hobby}-Liebhaber zum Anlass ${theme.anlass}.
 
@@ -72,73 +57,25 @@ Antworte im JSON Format:
 }
 `
 
+    const result = await model.generateContent(prompt)
+    const response = await result.response
+    const text = response.text()
+
     try {
-      // In production, call Google Gemini API
-      const response = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${process.env.GEMINI_API_KEY}`,
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [{ text: prompt }],
-              },
-            ],
-            generationConfig: {
-              temperature: 0.7,
-              topK: 40,
-              topP: 0.95,
-              maxOutputTokens: 2048,
-            },
-          }),
-        },
-      )
-
-      if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.statusText}`)
-      }
-
-      const data = await response.json()
-      const generatedText = data.candidates[0].content.parts[0].text
-
-      // Parse JSON response from AI
-      const parsedContent = JSON.parse(generatedText)
-
+      const parsedContent = JSON.parse(text)
       return {
         blogHtml: parsedContent.blogHtml,
         pinDescription: parsedContent.pinDescription,
         pinTags: parsedContent.pinTags,
-        tokensUsed: data.usageMetadata?.totalTokenCount || 0,
       }
     } catch (error) {
-      console.error("Error generating text:", error)
-
-      // Fallback mock response for development
-      return {
-        blogHtml: `
-          <h1>Die perfekten Geschenke für ${theme.hobby}-Liebhaber</h1>
-          <p>Wenn Sie auf der Suche nach dem idealen Geschenk für einen ${theme.hobby}-Enthusiasten sind, haben wir die besten Ideen für Sie zusammengestellt.</p>
-          <h2>Unsere Top-Empfehlungen</h2>
-          <p>Diese Geschenke treffen garantiert ins Schwarze und bereiten echte Freude.</p>
-        `,
-        pinDescription: `Entdecke die besten Geschenkideen für ${theme.hobby}-Liebhaber! Perfekt für ${theme.anlass} im Budget ${theme.budget}. 🎁`,
-        pinTags: [`#${theme.hobby}`, `#${theme.anlass}`, "#Geschenke", "#Geschenkideen", "#Shopping"],
-        tokensUsed: 1200,
-      }
+      throw new Error("Failed to parse AI response")
     }
   }
 
-  // Vertex AI Imagen integration for image generation
-  static async generateImage(request: GenerateImageRequest): Promise<GenerateImageResponse> {
-    const { theme } = request
-
-    const prompt =
-      request.prompt ||
-      `
+  // Vertex AI für Bildgenerierung
+  static async generateImage(theme: any): Promise<{ imageUrl: string; altText: string }> {
+    const prompt = `
 Professional product photography showing gift ideas for ${theme.hobby} enthusiasts.
 Style: ${theme.stil}, occasion: ${theme.anlass}, budget range: ${theme.budget}.
 Composition: Flat lay or arranged display on clean white background.
@@ -146,68 +83,55 @@ Lighting: Soft, natural lighting. High quality, Pinterest-ready image.
 No text overlays, focus on products only.
 `
 
-    try {
-      // In production, call Vertex AI Imagen API
-      const response = await fetch(
-        `https://${process.env.VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1/projects/${process.env.VERTEX_AI_PROJECT}/locations/${process.env.VERTEX_AI_LOCATION}/publishers/google/models/imagegeneration:predict`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${await this.getVertexAIToken()}`,
-          },
-          body: JSON.stringify({
-            instances: [
-              {
-                prompt: prompt,
-              },
-            ],
-            parameters: {
-              sampleCount: 1,
-              aspectRatio: "4:3",
-              safetyFilterLevel: "block_some",
-              personGeneration: "dont_allow",
-            },
-          }),
+    // Google Cloud Credentials aus Environment Variable
+    const credentials = JSON.parse(process.env.GOOGLE_CLOUD_CREDENTIALS!)
+
+    const response = await fetch(
+      `https://${process.env.VERTEX_AI_LOCATION}-aiplatform.googleapis.com/v1/projects/${process.env.VERTEX_AI_PROJECT}/locations/${process.env.VERTEX_AI_LOCATION}/publishers/google/models/imagegeneration:predict`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${await this.getAccessToken(credentials)}`,
         },
-      )
+        body: JSON.stringify({
+          instances: [{ prompt }],
+          parameters: {
+            sampleCount: 1,
+            aspectRatio: "4:3",
+            safetyFilterLevel: "block_some",
+          },
+        }),
+      },
+    )
 
-      if (!response.ok) {
-        throw new Error(`Vertex AI error: ${response.statusText}`)
-      }
+    if (!response.ok) {
+      throw new Error(`Vertex AI Error: ${response.statusText}`)
+    }
 
-      const data = await response.json()
-      const imageBase64 = data.predictions[0].bytesBase64Encoded
+    const data = await response.json()
+    const imageBase64 = data.predictions[0].bytesBase64Encoded
 
-      // In production, upload to cloud storage and return URL
-      const imageUrl = await this.uploadImageToStorage(imageBase64)
+    // Bild zu Vercel Blob hochladen
+    const { BlobStorage } = await import("./storage")
+    const imageBuffer = Buffer.from(imageBase64, "base64")
+    const filename = `${Date.now()}-${theme.hobby.toLowerCase()}.png`
+    const imageUrl = await BlobStorage.saveImage(imageBuffer, filename)
 
-      return {
-        imageUrl,
-        altText: `Geschenkideen für ${theme.hobby}-Liebhaber`,
-        prompt,
-      }
-    } catch (error) {
-      console.error("Error generating image:", error)
-
-      // Fallback placeholder for development
-      return {
-        imageUrl: `/placeholder.svg?height=600&width=800&text=${encodeURIComponent(theme.hobby + " Geschenke")}`,
-        altText: `Geschenkideen für ${theme.hobby}-Liebhaber`,
-        prompt,
-      }
+    return {
+      imageUrl,
+      altText: `Geschenkideen für ${theme.hobby}-Liebhaber`,
     }
   }
 
-  private static async getVertexAIToken(): Promise<string> {
-    // In production, implement Google Cloud authentication
-    // This would typically use service account credentials
-    return "mock_token"
-  }
-
-  private static async uploadImageToStorage(imageBase64: string): Promise<string> {
-    // In production, upload to Google Cloud Storage, AWS S3, etc.
-    // Return the public URL of the uploaded image
-    return "/placeholder.svg?height=600&width=800&text=Generated+Image"
+  private static async getAccessToken(credentials: any): Promise<string> {
+    const { GoogleAuth } = await import("google-auth-library")
+    const auth = new GoogleAuth({
+      credentials,
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    })
+    const client = await auth.getClient()
+    const token = await client.getAccessToken()
+    return token.token!
   }
 }
