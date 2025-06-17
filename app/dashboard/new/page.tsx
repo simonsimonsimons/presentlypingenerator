@@ -11,8 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { ArrowLeft, Save } from "lucide-react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { ApiClient } from "@/lib/api-client"
+import { useToast } from "@/components/ui/use-toast"
 
 export default function NewThemePage() {
+  const router = useRouter()
+  const { toast } = useToast()
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     title: "",
     anlass: "",
@@ -24,11 +30,31 @@ export default function NewThemePage() {
     zusatzinfo: "",
   })
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Here you would typically send the data to your API
-    console.log("Submitting theme:", formData)
-    // Redirect to dashboard or show success message
+    setIsSubmitting(true)
+
+    try {
+      console.log("Submitting theme:", formData)
+      const result = await ApiClient.createTheme(formData)
+
+      toast({
+        title: "Thema erstellt",
+        description: "Das neue Thema wurde erfolgreich erstellt.",
+      })
+
+      // Zur Detailseite des neuen Posts navigieren
+      router.push(`/dashboard/posts/${result.post.id}`)
+    } catch (error) {
+      console.error("Error creating theme:", error)
+      toast({
+        title: "Fehler",
+        description: "Das Thema konnte nicht erstellt werden. Bitte versuchen Sie es erneut.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleInputChange = (field: string, value: string) => {
@@ -198,9 +224,9 @@ export default function NewThemePage() {
                 </div>
 
                 <div className="flex gap-4 pt-4">
-                  <Button type="submit" className="flex-1">
+                  <Button type="submit" className="flex-1" disabled={isSubmitting}>
                     <Save className="w-4 h-4 mr-2" />
-                    Thema erstellen
+                    {isSubmitting ? "Wird erstellt..." : "Thema erstellen"}
                   </Button>
                   <Link href="/dashboard">
                     <Button type="button" variant="outline">

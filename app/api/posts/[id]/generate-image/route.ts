@@ -1,30 +1,52 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth"
+import { BlobStorage } from "@/lib/storage"
+import { AIServices } from "@/lib/ai-services"
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { id } = await params
+    console.log("Starting image generation for post:", params.id)
 
-    // In production, you would:
-    // 1. Get the post from database
-    // 2. Call Vertex AI Imagen or DALL-E API
-    // 3. Generate image based on the theme
-    // 4. Upload to cloud storage (S3, Google Cloud Storage, etc.)
-    // 5. Update post with image URL
-
-    // Mock image generation
-    const mockImageData = {
-      imageUrl: `/placeholder.svg?height=600&width=800&text=Kaffee+Geschenke`,
-      altText: "Verschiedene Kaffee-Geschenke arrangiert auf einem Holztisch",
-      prompt:
-        "Professional product photography of coffee gifts including premium coffee beans, French press, espresso cups, and coffee accessories arranged on a wooden table, warm lighting, high quality",
+    const session = await getServerSession(authOptions)
+    if (!session?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    // Simulate API delay
-    await new Promise((resolve) => setTimeout(resolve, 3000))
+    const post = await BlobStorage.getPost(params.id)
+    if (!post) {
+      return NextResponse.json({ error: "Post nicht gefunden" }, { status: 404 })
+    }
+
+    console.log("Generating image with theme:", post.theme)
+
+    // AI-Bildgenerierung aufrufen
+    const imageData = await AIServices.generateImage(post.theme)
+
+    console.log("Image generation successful:", imageData.imageUrl)
+
+    // Post aktualisieren
+    const updatedPost = {
+      ...post,
+      imageUrl: imageData.imageUrl,
+      imageAltText: imageData.altText,
+      status: "bild_generiert",
+      logs: [
+        ...post.logs,
+        {
+          action: "image_generated",
+          user: session.user.email || "unknown",
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    }
+
+    // Aktualisierter Post speichern
+    await BlobStorage.savePost(updatedPost)
 
     return NextResponse.json({
       success: true,
-      image: mockImageData,
+      image: imageData,
       message: "Bild erfolgreich generiert",
     })
   } catch (error) {

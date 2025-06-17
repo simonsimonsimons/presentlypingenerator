@@ -1,52 +1,55 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth"
+import { BlobStorage } from "@/lib/storage"
+import { AIServices } from "@/lib/ai-services"
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const { id } = await params
+    console.log("Starting text generation for post:", params.id)
 
-    // In production, you would:
-    // 1. Get the post from database
-    // 2. Call Google Gemini API with the theme data
-    // 3. Generate SEO-optimized blog content, Pinterest description, and hashtags
-    // 4. Update the post in database
+    const session = await getServerSession(authOptions)
+    if (!session?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-    // Mock AI-generated content
-    const mockGeneratedContent = {
-      blogHtml: `
-        <h1>Die perfekten Geschenke für Kaffeeliebhaber</h1>
-        <p>Kaffee ist mehr als nur ein Getränk – es ist eine Leidenschaft, ein Ritual und für viele Menschen der perfekte Start in den Tag. Wenn Sie auf der Suche nach dem idealen Geschenk für einen Kaffeeliebhaber sind, haben wir die besten Ideen für Sie zusammengestellt.</p>
-        
-        <h2>Premium Kaffeebohnen und Röstungen</h2>
-        <p>Hochwertige Kaffeebohnen sind das Herzstück jeder guten Tasse Kaffee. Überraschen Sie mit einer Auswahl exklusiver Röstungen aus verschiedenen Anbaugebieten.</p>
-        
-        <h2>Professionelle Zubereitungsgeräte</h2>
-        <p>Von der French Press bis zur Espressomaschine – die richtige Ausrüstung macht den Unterschied zwischen gutem und außergewöhnlichem Kaffee.</p>
-        
-        <h2>Kaffee-Accessoires für Genießer</h2>
-        <p>Ergänzen Sie die Kaffee-Ausrüstung mit durchdachten Accessoires wie Präzisionswaagen, Milchaufschäumern oder eleganten Tassen.</p>
-      `,
-      pinDescription:
-        "Entdecke die besten Geschenkideen für Kaffeeliebhaber! Von Premium-Bohnen bis zu professionellen Zubereitungsgeräten – hier findest du das perfekte Geschenk für jeden Kaffee-Enthusiasten. ☕️ #Kaffeegeschenke #Geschenkideen",
-      pinTags: [
-        "#Kaffee",
-        "#Geschenke",
-        "#Kaffeeliebhaber",
-        "#Geburtstag",
-        "#Geschenkideen",
-        "#Kaffeezubehör",
-        "#Barista",
-        "#Kaffeekultur",
-        "#Genuss",
-        "#Lifestyle",
+    const post = await BlobStorage.getPost(params.id)
+    if (!post) {
+      return NextResponse.json({ error: "Post nicht gefunden" }, { status: 404 })
+    }
+
+    console.log("Generating text with theme:", post.theme)
+
+    // AI-Textgenerierung aufrufen
+    const generatedContent = await AIServices.generateText({
+      theme: post.theme,
+    })
+
+    console.log("Text generation successful")
+
+    // Post aktualisieren
+    const updatedPost = {
+      ...post,
+      blogHtml: generatedContent.blogHtml,
+      pinDescription: generatedContent.pinDescription,
+      pinTags: generatedContent.pinTags,
+      status: "text_generiert",
+      logs: [
+        ...post.logs,
+        {
+          action: "text_generated",
+          user: session.user.email || "unknown",
+          timestamp: new Date().toISOString(),
+        },
       ],
     }
 
-    // Simulate API delay
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    // Aktualisierter Post speichern
+    await BlobStorage.savePost(updatedPost)
 
     return NextResponse.json({
       success: true,
-      content: mockGeneratedContent,
+      content: generatedContent,
       message: "Text erfolgreich generiert",
     })
   } catch (error) {
